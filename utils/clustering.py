@@ -1,12 +1,19 @@
 from sklearn.cluster import KMeans
-import joblib
-import os
+from sklearn.svm import SVC
+from sklearn.model_selection import train_test_split
 
-def apply_kmeans(X, n_clusters=4):
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    kmeans.fit(X)
+def perform_clustering(X, k=4):
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    labels = kmeans.fit_predict(X)
+    return labels
 
-    os.makedirs("models", exist_ok=True)
-    joblib.dump(kmeans, "models/kmeans_model.pkl")
+def train_classifier(X, labels):
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, labels, test_size=0.2, random_state=42, stratify=labels
+    )
 
-    return kmeans.labels_
+    model = SVC(kernel="linear", class_weight="balanced")
+    model.fit(X_train, y_train)
+
+    accuracy = model.score(X_test, y_test)
+    return model, accuracy
