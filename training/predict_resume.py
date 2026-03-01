@@ -11,6 +11,23 @@ PROJECT_ROOT = CURRENT_DIR.parent
 sys.path.append(str(PROJECT_ROOT))
 
 
+# ---------------------------------
+# LOAD MODELS (only once)
+# ---------------------------------
+vectorizer = pickle.load(open("models/vectorizer.pkl", "rb"))
+classifier = pickle.load(open("models/classifier.pkl", "rb"))
+
+# Manual cluster → job role mapping
+cluster_role_map = {
+    0: "Data Science",
+    1: "Web Development",
+    2: "Finance"
+}
+
+
+# ---------------------------------
+# TEXT EXTRACTION
+# ---------------------------------
 def extract_text(file_path):
 
     if file_path.endswith(".pdf"):
@@ -29,31 +46,58 @@ def extract_text(file_path):
         return ""
 
 
-def predict_resume(file_path):
+# ---------------------------------
+# PREDICTION FUNCTION
+# ---------------------------------
+def predict_text(text):
+    X = vectorizer.transform([text])
+    prediction = classifier.predict(X)[0]
+    return cluster_role_map.get(prediction, "Unknown Role")
 
-    vectorizer = pickle.load(open("models/vectorizer.pkl", "rb"))
-    classifier = pickle.load(open("models/classifier.pkl", "rb"))
+
+# ---------------------------------
+# HANDLE SINGLE FILE
+# ---------------------------------
+def predict_single(file_path):
 
     text = extract_text(file_path)
 
-    X = vectorizer.transform([text])
+    if not text.strip():
+        print(f"{file_path} → Could not extract text.")
+        return
 
-    prediction = classifier.predict(X)
+    role = predict_text(text)
 
-    return prediction[0]
+    print(f"{os.path.basename(file_path)} → {role}")
 
 
+# ---------------------------------
+# HANDLE FOLDER (BATCH)
+# ---------------------------------
+def predict_folder(folder_path):
+
+    for file in os.listdir(folder_path):
+
+        if file.endswith((".pdf", ".docx")):
+
+            file_path = os.path.join(folder_path, file)
+            predict_single(file_path)
+
+
+# ---------------------------------
+# MAIN
+# ---------------------------------
 if __name__ == "__main__":
-    file_path = input("Enter resume path: ")
-    result = predict_resume(file_path)
 
-# Manual mapping based on cluster interpretation
-    cluster_role_map = {
-        0: "Data Science",
-        1: "Web Development",
-        2: "Finance"
-    }
+    path = input("Enter file path OR folder path: ").strip()
 
-    job_role = cluster_role_map.get(result, "Unknown Role")
+    if os.path.isfile(path):
+        print("\nSingle Resume Prediction:\n")
+        predict_single(path)
 
-    print(f"\nPredicted Job Role: {job_role}")
+    elif os.path.isdir(path):
+        print("\nBatch Resume Prediction:\n")
+        predict_folder(path)
+
+    else:
+        print("Invalid path.")
