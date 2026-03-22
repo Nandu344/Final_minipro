@@ -1,62 +1,49 @@
 import os
-import joblib
-import pandas as pd
-
-from sklearn.model_selection import train_test_split
+import pickle
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.svm import LinearSVC
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.linear_model import LogisticRegression
+import pdfplumber
+from docx import Document
 
-from utils.text_extraction import extract_all_resumes
-
-
-# Path to clustered resumes folder
 DATASET_PATH = "dataset/clustered_resumes"
+
+def extract_text(file_path):
+    text = ""
+    if file_path.endswith(".pdf"):
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+    elif file_path.endswith(".docx"):
+        doc = Document(file_path)
+        for para in doc.paragraphs:
+            text += para.text
+    return text
+
 
 texts = []
 labels = []
 
-# Read resumes from cluster folders
-for category in os.listdir(DATASET_PATH):
-    category_path = os.path.join(DATASET_PATH, category)
+for cluster in os.listdir(DATASET_PATH):
+    cluster_path = os.path.join(DATASET_PATH, cluster)
 
-    if os.path.isdir(category_path):
-        for file in os.listdir(category_path):
-            file_path = os.path.join(category_path, file)
+    if os.path.isdir(cluster_path):
+        for file in os.listdir(cluster_path):
+            file_path = os.path.join(cluster_path, file)
+            text = extract_text(file_path)
+            if text.strip():
+                texts.append(text)
+                labels.append(cluster)
+            else:
+                print(f"Skipped unreadable file: {file}")
 
-            if file.endswith(".pdf") or file.endswith(".docx"):
-                extracted_texts, _ = extract_all_resumes(category_path)
-                texts.extend(extracted_texts)
-                labels.extend([category] * len(extracted_texts))
-                break
 
-
-print("Total samples:", len(texts))
-
-# TF-IDF Vectorization
-vectorizer = TfidfVectorizer(stop_words="english", max_features=3000)
+vectorizer = TfidfVectorizer(stop_words="english", max_features=5000)
 X = vectorizer.fit_transform(texts)
-y = labels
 
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+classifier = LogisticRegression(max_iter=1000)
+classifier.fit(X, labels)
 
-# Train SVM classifier
-model = LinearSVC()
-model.fit(X_train, y_train)
+pickle.dump(vectorizer, open("models/vectorizer.pkl", "wb"))
+pickle.dump(classifier, open("models/classifier.pkl", "wb"))
 
-# Evaluation
-y_pred = model.predict(X_test)
-
-print("\nAccuracy:", accuracy_score(y_test, y_pred))
-print("\nClassification Report:\n")
-print(classification_report(y_test, y_pred))
-
-# Save model
-os.makedirs("models", exist_ok=True)
-joblib.dump(model, "models/resume_classifier.pkl")
-joblib.dump(vectorizer, "models/tfidf_vectorizer.pkl")
-
-print("\nModel saved successfully.")
+print("Classifier trained successfully.")

@@ -1,135 +1,80 @@
 import os
-import sys
+import shutil
 import pickle
-from pathlib import Path
-
 import pdfplumber
-import docx
-
+from docx import Document
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+dataset_path = os.path.join(PROJECT_ROOT, "dataset", "raw_resumes")
+output_dir = os.path.join(PROJECT_ROOT, "dataset", "clustered_resumes")
+models_path = os.path.join(PROJECT_ROOT, "models")
+
+os.makedirs(output_dir, exist_ok=True)
+os.makedirs(models_path, exist_ok=True)
+
+def extract_text(file_path):
+    text = ""
+    if file_path.endswith(".pdf"):
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+    elif file_path.endswith(".docx"):
+        doc = Document(file_path)
+        for para in doc.paragraphs:
+            text += para.text
+    return text
 
 
-# -------------------------------
-# FIX PROJECT ROOT
-# -------------------------------
-CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent
-sys.path.append(str(PROJECT_ROOT))
-
-
-# -------------------------------
-# LOAD RESUMES
-# -------------------------------
 def load_resumes(folder_path):
     texts = []
     filenames = []
 
     for file in os.listdir(folder_path):
-        file_path = os.path.join(folder_path, file)
-
-        try:
-            if file.endswith(".pdf"):
-                text = ""
-                with pdfplumber.open(file_path) as pdf:
-                    for page in pdf.pages:
-                        if page.extract_text():
-                            text += page.extract_text()
-
-            elif file.endswith(".docx"):
-                doc = docx.Document(file_path)
-                text = "\n".join([para.text for para in doc.paragraphs])
-
-            else:
-                continue
-
-            if text.strip():
+        if file.endswith(".pdf") or file.endswith(".docx"):
+            path = os.path.join(folder_path, file)
+            text = extract_text(path)
+            if text.strip():   # only keep non-empty text
                 texts.append(text)
                 filenames.append(file)
-
-        except Exception as e:
-            print(f"Error reading {file}: {e}")
+            else:
+                print(f"Skipped unreadable file: {file}")
 
     return texts, filenames
 
 
-# -------------------------------
-# MAIN PIPELINE
-# -------------------------------
-def main():
+# Load data
+texts, filenames = load_resumes(dataset_path)
 
-    dataset_path = os.path.join(PROJECT_ROOT, "dataset", "raw_resumes")
+# Vectorization
+vectorizer = TfidfVectorizer(stop_words="english", max_features=5000, ngram_range=(1, 2))
+X = vectorizer.fit_transform(texts)
 
-    print("\nLoading resumes...")
-    resumes, filenames = load_resumes(dataset_path)
+# Clustering
+kmeans = KMeans(n_clusters=3, random_state=42)
+cluster_labels = kmeans.fit_predict(X)
 
-    if len(resumes) == 0:
-        print("No resumes found.")
-        return
+# Create cluster folders
+for i in range(3):
+    os.makedirs(os.path.join(output_dir, f"cluster_{i}"), exist_ok=True)
 
-    print(f"Total resumes loaded: {len(resumes)}")
+# Copy files into clusters
+for file, label in zip(filenames, cluster_labels):
+    src = os.path.join(dataset_path, file)
+    dst = os.path.join(output_dir, f"cluster_{label}", file)
+    shutil.copy(src, dst)
 
-    # -------------------------------
-    # TF-IDF
-    # -------------------------------
-    print("\nCreating TF-IDF features...")
-    vectorizer = TfidfVectorizer(
-        stop_words="english",
-        max_features=2000,
-        ngram_range=(1,2)
-    )
+# Train classifier (pseudo-labeling)
 
-    X = vectorizer.fit_transform(resumes)
+classifier = SVC(kernel='linear')
+classifier.fit(X, cluster_labels)
 
-    # -------------------------------
-    # KMEANS CLUSTERING
-    # -------------------------------
-    print("\nClustering resumes...")
-    kmeans = KMeans(n_clusters=3, random_state=42)
-    kmeans.fit(X)
+# Save models
+pickle.dump(vectorizer, open(os.path.join(models_path, "vectorizer.pkl"), "wb"))
+pickle.dump(kmeans, open(os.path.join(models_path, "kmeans.pkl"), "wb"))
+pickle.dump(classifier, open(os.path.join(models_path, "classifier.pkl"), "wb"))
 
-    cluster_labels = kmeans.labels_
-
-    # Print cluster assignment
-    print("\nCluster Results:")
-    for file, label in zip(filenames, cluster_labels):
-        print(f"{file} → Cluster {label}")
-
-    # -------------------------------
-    # SHOW TOP WORDS PER CLUSTER
-    # -------------------------------
-    print("\nTop terms per cluster:")
-
-    order_centroids = kmeans.cluster_centers_.argsort()[:, ::-1]
-    terms = vectorizer.get_feature_names_out()
-
-    for i in range(3):
-        print(f"\nCluster {i} top words:")
-        for ind in order_centroids[i, :10]:
-            print(terms[ind])
-
-    # -------------------------------
-    # TRAIN CLASSIFIER USING PSEUDO LABELS
-    # -------------------------------
-    print("\nTraining classifier using pseudo labels...")
-
-    classifier = LogisticRegression(max_iter=1000)
-    classifier.fit(X, cluster_labels)
-
-    # -------------------------------
-    # SAVE EVERYTHING
-    # -------------------------------
-    models_path = os.path.join(PROJECT_ROOT, "models")
-    os.makedirs(models_path, exist_ok=True)
-
-    pickle.dump(kmeans, open(os.path.join(models_path, "kmeans.pkl"), "wb"))
-    pickle.dump(vectorizer, open(os.path.join(models_path, "vectorizer.pkl"), "wb"))
-    pickle.dump(classifier, open(os.path.join(models_path, "classifier.pkl"), "wb"))
-
-    print("\n✅ Clustering + Classifier training complete.")
-    print("Models saved in /models")
-
-
-if __name__ == "__main__":
-    main()
+print("Clustering + model training completed successfully.")

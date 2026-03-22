@@ -1,81 +1,98 @@
-import os
+import streamlit as st
 import pickle
 import pdfplumber
-import docx
+from docx import Document
+import pandas as pd
+import os
+from datetime import datetime
 
+UPLOAD_DIR = "dataset/raw_resumes"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# -----------------------------
-# LOAD MODELS
-# -----------------------------
 vectorizer = pickle.load(open("models/vectorizer.pkl", "rb"))
 classifier = pickle.load(open("models/classifier.pkl", "rb"))
 
-# Map cluster → job role
+def extract_text(file):
+    text = ""
+    if file.name.endswith(".pdf"):
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+    elif file.name.endswith(".docx"):
+        doc = Document(file)
+        for para in doc.paragraphs:
+            text += para.text
+    return text
+
+
 cluster_role_map = {
     0: "Data Science",
     1: "Web Development",
     2: "Finance"
 }
 
+st.title("AI Resume Screening System")
 
-# -----------------------------
-# TEXT EXTRACTION
-# -----------------------------
-def extract_text(file_path):
+uploaded_files = st.file_uploader("Upload resumes", accept_multiple_files=True)
 
-    if file_path.endswith(".pdf"):
-        text = ""
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                if page.extract_text():
-                    text += page.extract_text()
-        return text
+# Predict button
+if st.button("Predict"):
 
-    elif file_path.endswith(".docx"):
-        doc = docx.Document(file_path)
-        return "\n".join([para.text for para in doc.paragraphs])
+    if uploaded_files:
+        results = []
 
-    return ""
+        for file in uploaded_files:
+            # Create unique filename
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            saved_filename = f"{timestamp}_{file.name}"
+            save_path = os.path.join(UPLOAD_DIR, saved_filename)
+            
+            # Save file
+            with open(save_path, "wb") as f:
+                f.write(file.getbuffer())
+                
+            # Extract text from saved file
+            text = extract_text(open(save_path, "rb"))
+                
+            # Skip unreadable files
+            if not text.strip():
+                st.warning(f"{file.name} is unreadable.")
+                continue
+            
+            X = vectorizer.transform([text])
+            cluster = classifier.predict(X)[0]
+            role = cluster_role_map.get(cluster, "Unknown")
+            
+            results.append({
+                "Name": file.name,
+                "Job Category": role
+            })
 
+        # Convert to DataFrame
+        df = pd.DataFrame(results)
+        df.index = df.index + 1
 
-# -----------------------------
-# PREDICTION
-# -----------------------------
-def predict_resume(file_path):
-
-    text = extract_text(file_path)
-
-    if not text.strip():
-        return "Could not extract text"
-
-    X = vectorizer.transform([text])
-    cluster = classifier.predict(X)[0]
-
-    return cluster_role_map.get(cluster, "Unknown Role")
-
-
-# -----------------------------
-# MAIN
-# -----------------------------
-if __name__ == "__main__":
-
-    path = input("Enter file path OR folder path: ").strip()
-
-    if os.path.isfile(path):
-
-        print("\nSingle Resume Prediction:\n")
-        result = predict_resume(path)
-        print(f"{os.path.basename(path)} → {result}")
-
-    elif os.path.isdir(path):
-
-        print("\nBatch Resume Prediction:\n")
-
-        for file in os.listdir(path):
-            if file.endswith((".pdf", ".docx")):
-                file_path = os.path.join(path, file)
-                result = predict_resume(file_path)
-                print(f"{file} → {result}")
+        # Display table
+        st.subheader("Prediction Results")
+        st.dataframe(df)
 
     else:
-        print("Invalid path.")
+        st.warning("Please upload at least one file.")
+
+st.markdown("""
+<style>
+.stButton > button {
+    background-color: #2196F3 !important;  /* Blue */
+    color: white !important;
+    border-radius: 8px;
+    border: none;
+    padding: 0.5em 1em;
+    font-weight: bold;
+}
+
+.stButton > button:hover {
+    background-color: #2196F3 !important;  /* Darker blue */
+    color: white !important;
+}
+</style>
+""", unsafe_allow_html=True)
