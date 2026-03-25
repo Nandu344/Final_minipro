@@ -28,8 +28,11 @@ def extract_text(file):
 cluster_role_map = {
     0: "Data Science",
     1: "Web Development",
-    2: "Finance"
-}
+    2: "Finance",
+    3: "General/other",
+    4: "Data Analyst",
+    5: "HR"
+    }
 
 st.title("AI Resume Screening System")
 

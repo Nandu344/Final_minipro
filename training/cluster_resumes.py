@@ -54,11 +54,11 @@ vectorizer = TfidfVectorizer(stop_words="english", max_features=5000, ngram_rang
 X = vectorizer.fit_transform(texts)
 
 # Clustering
-kmeans = KMeans(n_clusters=3, random_state=42)
+kmeans = KMeans(n_clusters=6, random_state=42)
 cluster_labels = kmeans.fit_predict(X)
 
 # Create cluster folders
-for i in range(3):
+for i in range(6):
     os.makedirs(os.path.join(output_dir, f"cluster_{i}"), exist_ok=True)
 
 # Copy files into clusters
@@ -66,6 +66,7 @@ for file, label in zip(filenames, cluster_labels):
     src = os.path.join(dataset_path, file)
     dst = os.path.join(output_dir, f"cluster_{label}", file)
     shutil.copy(src, dst)
+    print(f"{file} → Cluster {label}")
 
 # Train classifier (pseudo-labeling)
 
